@@ -135,7 +135,7 @@ context and keeps the chunk's frames, as NeMo's
 context; the left context (5.6 s by default) only costs compute.
 
 ```python
-model = load("path/to/nemotron-labs-unified-asr-0.6b-mlx")
+model = load("T0mSIlver/nemotron-labs-unified-asr-0.6b-8bit")
 
 # Offline: one full-context pass (up to 60 s; longer audio streams 10/10/5 s windows).
 print(model.generate("speech.wav", language="fr").text)
