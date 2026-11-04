@@ -11,6 +11,29 @@ from .audio import StreamingLogMelSpectrogram
 from .streaming import ConformerStreamingState
 
 
+def _att_context_for_delay(model, delay_ms):
+    """Map a delay to one of the checkpoint's trained [left, lookahead] contexts.
+
+    A chunk holds lookahead + 1 encoder frames, so the delay is
+    (lookahead + 1) * frame_ms.
+    """
+    pre = model.preprocessor_config
+    frame_ms = 1000 * model.encoder_config.subsampling_factor * pre.hop_length
+    frame_ms /= pre.sample_rate
+    left = model.default_att_context_size[0]
+    delays = {
+        round((right + 1) * frame_ms): [left, right]
+        for context_left, right in model.encoder_config.att_context_size
+        if context_left == left
+    }
+    if delay_ms not in delays:
+        raise ValueError(
+            f"Unsupported transcription_delay_ms={delay_ms}; "
+            f"expected one of {sorted(delays)}"
+        )
+    return list(delays[delay_ms])
+
+
 class NemotronStreamingSession:
     """Single-consumer decoder; feed/close may run on another thread.
 
@@ -28,17 +51,10 @@ class NemotronStreamingSession:
         self.language = language or model.default_language
         model._resolve_prompt_index(self.language)
         self.att_context_size = model.default_att_context_size
-        if (
-            transcription_delay_ms is not None
-            and model.model_type == "nemotron_asr_streaming"
-        ):
-            lookahead = {80: 0, 160: 1, 560: 6, 1120: 13}.get(transcription_delay_ms)
-            if lookahead is None:
-                raise ValueError(
-                    f"Unsupported transcription_delay_ms={transcription_delay_ms}; "
-                    "expected one of [80, 160, 560, 1120]"
-                )
-            self.att_context_size = [model.default_att_context_size[0], lookahead]
+        if transcription_delay_ms is not None:
+            self.att_context_size = _att_context_for_delay(
+                model, transcription_delay_ms
+            )
         self.input_sample_rate = model.preprocessor_config.sample_rate
         self._lock = Lock()
         self.reset()
