@@ -131,11 +131,11 @@ class BufferedEncoderState:
             self._prev_start = start
             self._next += C
         outputs = self._encode_batches(ready)
-        if not self._full_window and ready and ready[-1][1] - ready[-1][0] == L + C + R:
+        if not self._full_window and ready:
             # Until the left context fills, every window is a new size and MLX's
-            # buffer cache keeps each size's buffers. From here on every window has
-            # one size, so drop the ramp's buffers once.
-            self._full_window = True
+            # buffer cache would keep each size's buffers. Drop them after each such
+            # step; from the first full window on, the cache reuses one size.
+            self._full_window = ready[-1][1] - ready[-1][0] == L + C + R
             mx.clear_cache()
         if final:
             if self._total > self._next:
