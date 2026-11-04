@@ -9,6 +9,11 @@ The same implementation loads NVIDIA's native Transformers checkpoint
 [`nvidia/nemotron-speech-streaming-en-0.6b`](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b)
 directly, including its 80, 160, 560, and 1120 ms English streaming modes.
 
+The same module runs NVIDIA's
+[`nvidia/nemotron-labs-unified-asr-0.6b`](https://huggingface.co/nvidia/nemotron-labs-unified-asr-0.6b)
+(25 European languages, offline and streaming in one checkpoint); see
+[Nemotron Unified](#nemotron-unified) below.
+
 ## Models
 
 | Repo | Precision | Size |
@@ -120,3 +125,27 @@ python -m mlx_audio.stt.models.nemotron_asr.convert \
 
 `--nemo-path` takes a local `.nemo` file **or** a HuggingFace repo id. Add `--quantize`
 (`--q-bits 8`) for a quantized build, or `--dtype float16`.
+
+## Nemotron Unified
+
+`nemotron-labs-unified-asr-0.6b` has a non-causal encoder, so it streams
+*buffered*: every step re-encodes a window of left context + chunk + right
+context and keeps the chunk's frames, as NeMo's
+`speech_to_text_streaming_infer_rnnt.py` does. Latency is chunk + right
+context; the left context (5.6 s by default) only costs compute.
+
+```python
+model = load("path/to/nemotron-labs-unified-asr-0.6b-mlx")
+
+# Offline: one full-context pass (up to 60 s; longer audio streams 10/10/5 s windows).
+print(model.generate("speech.wav", language="fr").text)
+
+# Live: 160, 240, 320 (default), 560, 1120 or 2080 ms latency.
+session = model.create_streaming_session(language="fr", transcription_delay_ms=320)
+```
+
+Pass the spoken language (`en`, `fr`, `de`, … or `auto`). At low latency,
+`auto` can emit a few first tokens in the wrong language. `stream_generate`
+and `generate(att_context_size=[left, chunk, right])` take explicit contexts in
+80 ms encoder frames. Convert with the same command as above
+(`--nemo-path nvidia/nemotron-labs-unified-asr-0.6b`).
