@@ -16,10 +16,11 @@ The same module runs NVIDIA's
 
 ## Models
 
-| Repo | Precision | Size |
-|------|-----------|------|
-| [`mlx-community/nemotron-3.5-asr-streaming-0.6b`](https://huggingface.co/mlx-community/nemotron-3.5-asr-streaming-0.6b) | bf16 | ~1.2 GB |
-| [`mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`](https://huggingface.co/mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit) | 8-bit | ~720 MB |
+| Model | Repo | Precision | Size |
+|-------|------|-----------|------|
+| Nemotron 3.5 | [`mlx-community/nemotron-3.5-asr-streaming-0.6b`](https://huggingface.co/mlx-community/nemotron-3.5-asr-streaming-0.6b) | bf16 | ~1.2 GB |
+| Nemotron 3.5 | [`mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`](https://huggingface.co/mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit) | 8-bit | ~720 MB |
+| Nemotron Unified | [`T0mSIlver/nemotron-labs-unified-asr-0.6b-8bit`](https://huggingface.co/T0mSIlver/nemotron-labs-unified-asr-0.6b-8bit) | 8-bit | ~744 MB |
 
 ## Usage
 
@@ -112,20 +113,6 @@ audio ─► log-mel (128, no norm) ─► FastConformer encoder (24 layers, d=1
 Run offline, the `chunked_limited` attention mask reproduces the training-time look-ahead,
 so a single full-utterance pass matches the streaming model's output.
 
-## Converting the original weights (optional)
-
-Most users should just load the pre-converted repos above. If you want to convert the
-original `.nemo` yourself (needs `torch` + `pyyaml`):
-
-```bash
-python -m mlx_audio.stt.models.nemotron_asr.convert \
-    --nemo-path nvidia/nemotron-3.5-asr-streaming-0.6b \
-    --mlx-path  ./nemotron-3.5-asr-streaming-0.6b-mlx
-```
-
-`--nemo-path` takes a local `.nemo` file **or** a HuggingFace repo id. Add `--quantize`
-(`--q-bits 8`) for a quantized build, or `--dtype float16`.
-
 ## Nemotron Unified
 
 `nemotron-labs-unified-asr-0.6b` has a non-causal encoder, so it streams
@@ -153,5 +140,19 @@ Pass the spoken language (`en`, `fr`, `de`, … or `auto`). As in NeMo, a bare
 code matches a unique locale key and an unknown or ambiguous language raises.
 At low latency, `auto` can emit a few first tokens in the wrong language. `stream_generate`
 and `generate(att_context_size=[left, chunk, right])` take explicit contexts in
-80 ms encoder frames. Convert with the same command as above
+80 ms encoder frames. Convert it with the command below
 (`--nemo-path nvidia/nemotron-labs-unified-asr-0.6b`).
+
+## Converting the original weights (optional)
+
+Most users should just load the pre-converted repos above. If you want to convert the
+original `.nemo` yourself (needs `torch` + `pyyaml`):
+
+```bash
+python -m mlx_audio.stt.models.nemotron_asr.convert \
+    --nemo-path nvidia/nemotron-3.5-asr-streaming-0.6b \
+    --mlx-path  ./nemotron-3.5-asr-streaming-0.6b-mlx
+```
+
+`--nemo-path` takes a local `.nemo` file **or** a HuggingFace repo id. Add `--quantize`
+(`--q-bits 8`) for a quantized build, or `--dtype float16`.

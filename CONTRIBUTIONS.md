@@ -55,7 +55,7 @@ This file acknowledges the original authors and contributors of models ported to
 
 - **Original**: [nvidia/nemotron-labs-unified-asr-0.6b](https://huggingface.co/nvidia/nemotron-labs-unified-asr-0.6b); buffered streaming after [NeMo Speech](https://github.com/NVIDIA-NeMo/Speech)
 - **Copyright**: NVIDIA Corporation
-- **License**: [OpenMDW-1.1](https://huggingface.co/nvidia/nemotron-labs-unified-asr-0.6b/blob/main/LICENSE.md)
+- **License**: [OpenMDW-1.1](https://huggingface.co/nvidia/nemotron-labs-unified-asr-0.6b/blob/main/LICENSE.md) (weights); Apache-2.0 (adapted NeMo code)
 - **MLX Port**: Tom Vaucourt ([@T0mSIlver](https://github.com/T0mSIlver))
 
 ## rumik-oss 1 (Text-to-Speech)

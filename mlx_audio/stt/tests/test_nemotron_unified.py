@@ -2,10 +2,9 @@
 
 Tiny randomly initialized models cover the converter config, the
 ``chunked_limited_with_rc`` mask, padding isolation, the per-feature mel and the
-buffered segmentation. The real-weight test needs a converted model directory.
+buffered segmentation. Real weights are checked against NeMo's tokens in
+``test_nemotron_unified_nemo_parity.py``.
 """
-
-import os
 
 import mlx.core as mx
 import numpy as np
@@ -272,23 +271,6 @@ def test_language_resolution_follows_nemo():
         model._resolve_prompt_index("en")
     with pytest.raises(ValueError, match="not supported"):
         model._resolve_prompt_index("fr-CH")
-
-
-@pytest.mark.requires_weights
-def test_real_unified_model_streams_like_offline():
-    path = os.environ.get("NEMOTRON_UNIFIED_MLX_PATH")
-    audio = os.environ.get("NEMOTRON_UNIFIED_TEST_AUDIO")
-    if not path or not audio:
-        pytest.skip(
-            "set NEMOTRON_UNIFIED_MLX_PATH and NEMOTRON_UNIFIED_TEST_AUDIO (English wav)"
-        )
-    from mlx_audio.stt import load
-
-    model = load(path)
-    offline = model.generate(audio, language="en").text.strip()
-    streamed = list(model.stream_generate(audio, language="en"))[-1].text.strip()
-    assert offline
-    assert streamed
 
 
 def test_session_takes_an_explicit_context():

@@ -4,7 +4,13 @@ The fixture holds token ids from NeMo (``EncDecRNNTBPEModelWithPrompt``, fp32 on
 the ``speech_to_text_streaming_infer_rnnt.py`` buffer loop at batch 1, 5.6 s left
 context) for ``mega_asr/fixtures/clean.wav`` (16 kHz, so no resampler differs), offline and at NVIDIA's latency
 rows. An fp32 conversion must match token for token; bf16 and quantized ones within
-a small edit rate. Needs a converted checkpoint: set NEMOTRON_UNIFIED_MLX_PATH.
+a small edit rate.
+
+NEMOTRON_UNIFIED_MLX_PATH names the checkpoint, a local directory or a Hugging Face
+repo id, as ``load`` takes either:
+
+    NEMOTRON_UNIFIED_MLX_PATH=T0mSIlver/nemotron-labs-unified-asr-0.6b-8bit \
+        pytest mlx_audio/stt/tests/test_nemotron_unified_nemo_parity.py
 """
 
 import json
@@ -13,6 +19,8 @@ from pathlib import Path
 
 import mlx.core as mx
 import pytest
+
+pytestmark = pytest.mark.requires_weights
 
 FIXTURE = Path(__file__).parent / "data" / "nemotron_unified_nemo_tokens.json"
 AUDIO = Path(__file__).parent / "mega_asr" / "fixtures" / "clean.wav"
@@ -40,7 +48,8 @@ def model():
     path = os.environ.get("NEMOTRON_UNIFIED_MLX_PATH")
     if not path:
         pytest.skip(
-            "set NEMOTRON_UNIFIED_MLX_PATH to a converted Nemotron Unified checkpoint"
+            "set NEMOTRON_UNIFIED_MLX_PATH to a Nemotron Unified checkpoint "
+            "(a local directory or a Hugging Face repo id)"
         )
     from mlx_audio.stt import load
 
