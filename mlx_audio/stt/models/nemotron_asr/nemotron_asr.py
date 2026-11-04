@@ -529,6 +529,15 @@ class Model(nn.Module):
         finally:
             mx.clear_cache()
 
+    @property
+    def compute_dtype(self) -> mx.Dtype:
+        """The weights' float dtype (a quantized layer's scales), used by Unified paths
+        for activations as the Swift port does; float32 weights compute in float32."""
+        out = self.encoder.pre_encode.out
+        scales = getattr(out, "scales", None)
+        dtype = (scales if scales is not None else out.weight).dtype
+        return dtype if mx.issubdtype(dtype, mx.floating) else mx.float32
+
     # ---------------------------------------------------------------- buffered
     # Offline, Unified runs one full-context pass up to this length, then NeMo's
     # long-form buffered setting (10 s left, 10 s chunk, 5 s right).
@@ -546,7 +555,9 @@ class Model(nn.Module):
                 [audio_data.shape[0] // self.preprocessor_config.hop_length]
             )
             encoded, encoded_lengths = self.encoder(
-                mel, lengths=lengths, att_context_size=[-1, -1, -1]
+                mel.astype(self.compute_dtype),
+                lengths=lengths,
+                att_context_size=[-1, -1, -1],
             )
             encoded = self.apply_prompt(encoded[:, : int(encoded_lengths[0])], language)
             mx.eval(encoded)

@@ -200,7 +200,7 @@ class BufferedEncoderState:
         ]
         lengths = mx.array([length // self.hop] * len(starts), dtype=mx.int32)
         encoded, encoded_lengths = model.encoder(
-            mx.concatenate(mels, axis=0),
+            mx.concatenate(mels, axis=0).astype(model.compute_dtype),
             lengths=lengths,
             att_context_size=self.context.as_list(),
         )
