@@ -105,7 +105,13 @@ class BufferedEncoderState:
     def total_samples(self) -> int:
         return self._total
 
+    # Most windows encoded in one batched pass.
+    MAX_BATCH = 16
+
     def push(self, samples, *, final: bool = False) -> list[mx.array]:
+        """Prompted chunks this push completes, in audio order. Chunks that become
+        ready together (a step after a slow one, a whole file) encode their
+        equal-length windows as one batch."""
         if self._done:
             if np.asarray(samples).size:
                 raise RuntimeError("buffered encoder is finished")
@@ -115,23 +121,25 @@ class BufferedEncoderState:
             self._samples = np.concatenate([self._samples, samples])
             self._total += samples.size
 
-        outputs = []
         C, R, L = self.chunk_samples, self.right_samples, self.left_samples
-        while not self._done:
-            chunk_end = self._next + C
-            if self._total > chunk_end + R:
-                start = max(0, self._next - L)
-                outputs.append(self._encode(start, chunk_end + R, last=False))
-                self._prev_start = start
-                self._next = chunk_end
-            elif final:
-                if self._total > self._next:
-                    # NeMo caps the last buffer at left + chunk + right samples.
-                    start = max(self._prev_start, self._total - (L + C + R))
-                    outputs.append(self._encode(start, self._total, last=True))
-                self._done = True
-            else:
-                break
+        ready = []
+        while self._total > self._next + C + R:
+            start = max(0, self._next - L)
+            ready.append(
+                (start, self._next + C + R, (self._next - start) // self.frame_samples)
+            )
+            self._prev_start = start
+            self._next += C
+        outputs = self._encode_batches(ready)
+        if final:
+            if self._total > self._next:
+                # NeMo caps the last buffer at left + chunk + right samples.
+                start = max(self._prev_start, self._total - (L + C + R))
+                left = (self._next - start) // self.frame_samples
+                outputs.extend(
+                    self._encode([start], self._total - start, left, last=True)
+                )
+            self._done = True
         self._trim()
         return outputs
 
@@ -146,19 +154,50 @@ class BufferedEncoderState:
             self._samples = self._samples[drop:]
             self._start = keep
 
-    def _encode(self, start: int, end: int, *, last: bool) -> mx.array:
+    def _encode_batches(self, windows) -> list[mx.array]:
+        outputs = []
+        i = 0
+        while i < len(windows):
+            # Windows of equal length and left context share every shape and mask.
+            j = i + 1
+            while (
+                j < len(windows)
+                and j - i < self.MAX_BATCH
+                and windows[j][1] - windows[j][0] == windows[i][1] - windows[i][0]
+                and windows[j][2] == windows[i][2]
+            ):
+                j += 1
+            group = windows[i:j]
+            outputs.extend(
+                self._encode(
+                    [w[0] for w in group],
+                    group[0][1] - group[0][0],
+                    group[0][2],
+                    last=False,
+                )
+            )
+            i = j
+        return outputs
+
+    def _encode(
+        self, starts: list[int], length: int, left: int, *, last: bool
+    ) -> list[mx.array]:
+        """Encode windows ``[start, start + length)``, one per start, in one batch."""
         model = self.model
-        audio = self._samples[start - self._start : end - self._start]
-        mel = log_mel_spectrogram(mx.array(audio), model.preprocessor_config)
-        lengths = mx.array([audio.size // self.hop], dtype=mx.int32)
+        mels = [
+            log_mel_spectrogram(
+                mx.array(self._samples[s - self._start : s - self._start + length]),
+                model.preprocessor_config,
+            )
+            for s in starts
+        ]
+        lengths = mx.array([length // self.hop] * len(starts), dtype=mx.int32)
         encoded, encoded_lengths = model.encoder(
-            mel, lengths=lengths, att_context_size=self.context.as_list()
+            mx.concatenate(mels, axis=0),
+            lengths=lengths,
+            att_context_size=self.context.as_list(),
         )
-        left = (self._next - start) // self.frame_samples
-        if last:
-            count = int(encoded_lengths[0]) - left
-        else:
-            count = self.context.chunk
+        count = int(encoded_lengths[0]) - left if last else self.context.chunk
         prompted = model.apply_prompt(encoded[:, left : left + count], self.language)
         mx.eval(prompted)
-        return prompted
+        return [prompted[b : b + 1] for b in range(len(starts))]

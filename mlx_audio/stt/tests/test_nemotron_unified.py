@@ -152,7 +152,7 @@ def _nemo_windows(total, left, chunk, right):
     return windows
 
 
-@pytest.mark.parametrize("feed", [97, 512, 4000])
+@pytest.mark.parametrize("feed", [97, 512, 4000, 10**6])
 @pytest.mark.parametrize(
     "frames_and_extra", [(0, 1), (1, 0), (3, 0), (5, 0), (6, 0), (9, 300), (31, 7)]
 )
@@ -164,16 +164,19 @@ def test_buffered_windows_match_nemo(feed, frames_and_extra):
     total = frames_and_extra[0] * fs + frames_and_extra[1]
     seen = []
 
-    def record(start, end, *, last):
-        seen.append((start, end, state._next - start, last))
-        return mx.zeros((1, 1, 32))
+    def record(starts, length, left, *, last):
+        seen.extend((s, s + length, left, last) for s in starts)
+        return [mx.zeros((1, 1, 32))] * len(starts)
 
     state._encode = record
     audio = np.zeros(total, dtype=np.float32)
     for start in range(0, total, feed):
         state.push(audio[start : start + feed])
     state.flush()
-    expected = _nemo_windows(total, 4 * fs, fs, 2 * fs)
+    expected = [
+        (start, end, left // fs, last)
+        for start, end, left, last in _nemo_windows(total, 4 * fs, fs, 2 * fs)
+    ]
     assert seen == expected
 
 
