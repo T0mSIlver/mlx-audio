@@ -181,11 +181,12 @@ class NemotronStreamingSession:
         elif not self._encoded and not self._flushed:
             self._ingest()
         deltas = []
-        # A buffered session ingests up to a batch of chunks per step, so a blank
-        # frame does not use the budget: it caps emitted tokens, and the frames the
-        # step ingested decode within it whatever the server's message size.
-        evaluations = emitted = 0
-        while self._encoded and emitted < max_decode_tokens:
+        # The realtime server steps once per message with a small budget. A buffered
+        # session decodes everything it ingested (at most a batch of chunks, each frame
+        # at most max_symbols tokens), so it keeps up at any message size up to that
+        # batch; Nemotron 3.5 keeps the budget as joint evaluations.
+        evaluations = 0
+        while self._encoded:
             if self._context is None and evaluations == max_decode_tokens:
                 break
             evaluations += 1
@@ -213,7 +214,6 @@ class NemotronStreamingSession:
                 if text:
                     self._has_text = True
                     deltas.append(text)
-                emitted += 1
                 self._symbols += 1
             if prediction == self.model.blank_id or (
                 self.model.max_symbols is not None

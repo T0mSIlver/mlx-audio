@@ -168,12 +168,10 @@ def test_feed_rejects_stereo_and_non_finite():
 @pytest.mark.parametrize("message_ms", [100, 200, 480, 1000])
 def test_server_pattern_keeps_up_with_large_messages(message_ms):
     # The realtime server steps once per received message, with a budget of 8. A
-    # session that took one chunk per step overflowed its 30 s queue; one that counted
-    # blank frames against the budget (12.5 per 1 s message) piled up encoded frames.
-    # The joint always predicts blank, as on silence: a random model's dense tokens
-    # would make decoding, not ingest, the limit.
+    # session that took one chunk per step overflowed its 30 s queue; one that kept
+    # the budget piled up encoded frames (12.5 per 1 s message, plus the tokens; the
+    # random model emits far more tokens than a real one).
     model = _unified_model()
-    model.joint = lambda enc, pred: mx.arange(model.blank_id + 1)
     session = model.create_streaming_session(
         language="en-US", transcription_delay_ms=320
     )
