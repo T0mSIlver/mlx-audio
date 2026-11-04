@@ -22,8 +22,9 @@ import numpy as np
 
 from .audio import log_mel_spectrogram
 
-# Native latencies (chunk + right context, in ms) and the [chunk, right] encoder
-# frames NVIDIA recommends for each; the left context defaults to 5.6 s.
+# NVIDIA's recommended [chunk, right] encoder frames (80 ms each) per latency
+# (chunk + right context). Other latencies take the chunk of the row at or
+# below them and the rest as right context.
 DELAY_CONTEXTS = {
     160: (1, 1),
     240: (1, 2),
@@ -61,13 +62,11 @@ class BufferedContext:
     def from_delay_ms(
         cls, delay_ms: int, left: int = DEFAULT_LEFT_CONTEXT
     ) -> "BufferedContext":
-        if delay_ms not in DELAY_CONTEXTS:
-            raise ValueError(
-                f"Unsupported transcription_delay_ms={delay_ms}; "
-                f"expected one of {sorted(DELAY_CONTEXTS)}"
-            )
-        chunk, right = DELAY_CONTEXTS[delay_ms]
-        return cls(left, chunk, right)
+        """Context for a latency, rounded to whole 80 ms frames within 160-2080 ms."""
+        frames = min(max(int(delay_ms / 80 + 0.5), 2), 26)  # half up, as in Swift
+        row = max(ms for ms in DELAY_CONTEXTS if ms <= frames * 80)
+        chunk = DELAY_CONTEXTS[row][0]
+        return cls(left, chunk, frames - chunk)
 
     def as_list(self) -> list[int]:
         return [self.left, self.chunk, self.right]
@@ -148,7 +147,8 @@ class BufferedEncoderState:
                 )
             self._done = True
         self._trim()
-        return outputs
+        # A last window under one hop (10 ms) of new audio has no frame to decode.
+        return [o for o in outputs if o.shape[1] > 0]
 
     def flush(self) -> list[mx.array]:
         return self.push(np.zeros(0, dtype=np.float32), final=True)

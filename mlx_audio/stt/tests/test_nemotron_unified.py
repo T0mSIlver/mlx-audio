@@ -203,12 +203,57 @@ def test_session_matches_stream_generate(frames_and_extra):
         assert _session_text(model, audio, feed) == whole.strip()
 
 
-def test_session_maps_transcription_delay():
+@pytest.mark.parametrize(
+    ("delay_ms", "chunk_right"),
+    [
+        (80, [1, 1]),
+        (160, [1, 1]),
+        (200, [1, 2]),
+        (320, [1, 3]),
+        (400, [1, 4]),
+        (480, [1, 5]),
+        (560, [2, 5]),
+        (1040, [2, 11]),
+        (1120, [7, 7]),
+        (1200, [7, 8]),
+        (2080, [13, 13]),
+        (5000, [13, 13]),
+    ],
+)
+def test_session_maps_transcription_delay(delay_ms, chunk_right):
     model = _unified_model()
-    session = model.create_streaming_session(transcription_delay_ms=560)
-    assert session.att_context_size == [4, 2, 5]
-    with pytest.raises(ValueError):
-        model.create_streaming_session(transcription_delay_ms=80)
+    session = model.create_streaming_session(transcription_delay_ms=delay_ms)
+    assert session.att_context_size == [4] + chunk_right
+
+
+@pytest.mark.parametrize("samples", [1, 80, 159, 160, 161])
+def test_session_stops_cleanly_on_tiny_input(samples):
+    model = _unified_model()
+    audio = np.random.default_rng(2).normal(0, 0.05, samples).astype(np.float32)
+    session = model.create_streaming_session(language="en-US")
+    session.feed(audio)
+    session.close()
+    parts = []
+    for _ in range(100):
+        parts.extend(session.step())
+        if session.done:
+            break
+    assert session.done
+    results = list(model.stream_generate(mx.array(audio), language="en-US"))
+    assert "".join(parts) == (results[-1].text.strip() if results else "")
+
+
+def test_language_resolution_follows_nemo():
+    model = _unified_model()
+    model.prompt_dictionary = {"en-US": 0, "en-GB": 1, "fr-FR": 2, "de": 3, "auto": 4}
+    assert model._resolve_prompt_index(None) == 4  # the default, auto
+    assert model._resolve_prompt_index("de") == 3
+    assert model._resolve_prompt_index("fr") == 2  # unique locale for a bare code
+    assert model._resolve_prompt_index("FR") == 2
+    with pytest.raises(ValueError, match="ambiguous"):
+        model._resolve_prompt_index("en")
+    with pytest.raises(ValueError, match="not supported"):
+        model._resolve_prompt_index("fr-CH")
 
 
 @pytest.mark.requires_weights

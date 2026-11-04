@@ -349,12 +349,28 @@ class Model(nn.Module):
 
     # ------------------------------------------------------------------ prompt
     def _resolve_prompt_index(self, language: Optional[str]) -> int:
+        """NeMo's rule: an exact key, else a bare code that matches exactly one
+        locale key (``de`` -> ``de-DE``); anything else raises. No language
+        selects the model's default."""
+        if not self.prompt_dictionary:
+            return 0
         lang = language or self.default_language
         if lang in self.prompt_dictionary:
             return self.prompt_dictionary[lang]
-        if self.default_language in self.prompt_dictionary:
-            return self.prompt_dictionary[self.default_language]
-        return 0
+        prefix = f"{lang.lower()}-"
+        matches = sorted(
+            key for key in self.prompt_dictionary if key.lower().startswith(prefix)
+        )
+        if len(matches) == 1:
+            return self.prompt_dictionary[matches[0]]
+        if matches:
+            raise ValueError(
+                f"Language '{lang}' is ambiguous for this model: it matches {matches}"
+            )
+        raise ValueError(
+            f"Language '{lang}' is not supported by this model. Supported: "
+            + ", ".join(sorted(self.prompt_dictionary))
+        )
 
     def apply_prompt(self, encoded: mx.array, language: Optional[str]) -> mx.array:
         """Concatenate the one-hot language prompt and project back to d_model."""

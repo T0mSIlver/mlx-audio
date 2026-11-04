@@ -140,12 +140,18 @@ model = load("path/to/nemotron-labs-unified-asr-0.6b-mlx")
 # Offline: one full-context pass (up to 60 s; longer audio streams 10/10/5 s windows).
 print(model.generate("speech.wav", language="fr").text)
 
-# Live: 160, 240, 320 (default), 560, 1120 or 2080 ms latency.
+# Live: latency from 160 to 2080 ms (320 by default).
 session = model.create_streaming_session(language="fr", transcription_delay_ms=320)
 ```
 
-Pass the spoken language (`en`, `fr`, `de`, … or `auto`). At low latency,
-`auto` can emit a few first tokens in the wrong language. `stream_generate`
+`transcription_delay_ms` is rounded to whole 80 ms frames and clamped to
+160-2080 ms. NVIDIA's recommended contexts give the chunk (160/240/320 ms: 80 ms
+chunk; 560 ms: 160 ms; 1120 ms: 560 ms; 2080 ms: 1040 ms); a latency between
+two rows takes the lower row's chunk and the rest as right context.
+
+Pass the spoken language (`en`, `fr`, `de`, … or `auto`). As in NeMo, a bare
+code matches a unique locale key and an unknown or ambiguous language raises.
+At low latency, `auto` can emit a few first tokens in the wrong language. `stream_generate`
 and `generate(att_context_size=[left, chunk, right])` take explicit contexts in
 80 ms encoder frames. Convert with the same command as above
 (`--nemo-path nvidia/nemotron-labs-unified-asr-0.6b`).
