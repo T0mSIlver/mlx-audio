@@ -163,3 +163,19 @@ def test_feed_rejects_stereo_and_non_finite():
         session.feed(np.zeros((1280, 2), np.float32))
     with pytest.raises(ValueError):
         session.feed(np.array([0.0, np.nan], np.float32))
+
+
+@pytest.mark.parametrize("message_ms", [100, 200, 480])
+def test_server_pattern_keeps_up_with_large_messages(message_ms):
+    # The realtime server steps once per received message; a session that took one
+    # chunk per step fell behind and overflowed its 30 s queue.
+    model = _unified_model()
+    session = model.create_streaming_session(
+        language="en-US", transcription_delay_ms=320
+    )
+    message = message_ms * 16
+    audio = _audio(120 * 16000)
+    for start in range(0, audio.size, message):
+        session.feed(audio[start : start + message])
+        session.step(max_decode_tokens=8)
+    assert session._queued < 2 * message + session._buffered.chunk_samples

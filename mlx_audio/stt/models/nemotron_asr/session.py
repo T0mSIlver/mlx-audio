@@ -115,9 +115,11 @@ class NemotronStreamingSession:
             self._done = True
 
     def _ingest(self):
-        # At most one native encoder chunk of audio per cooperative step.
+        # At most one native encoder chunk of audio per cooperative step; a
+        # buffered session takes up to a batch of chunks, so clients that send
+        # more than one chunk per message keep up.
         if self._context is not None:
-            limit = self._buffered.chunk_samples
+            limit = self._buffered.chunk_samples * self._buffered.MAX_BATCH
         else:
             limit = self._encoder.chunk_mel * self.model.preprocessor_config.hop_length
         parts = []
@@ -154,7 +156,12 @@ class NemotronStreamingSession:
             raise ValueError("max_decode_tokens must be positive")
         if self.done:
             return []
-        if not self._encoded and not self._flushed:
+        if self._context is not None:
+            # Buffered: ingest every step, so the audio queue drains even while
+            # decoding catches up on frames already encoded.
+            if not self._flushed:
+                self._ingest()
+        elif not self._encoded and not self._flushed:
             self._ingest()
         deltas = []
         for _ in range(max_decode_tokens):
