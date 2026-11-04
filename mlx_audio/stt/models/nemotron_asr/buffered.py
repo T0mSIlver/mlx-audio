@@ -95,6 +95,7 @@ class BufferedEncoderState:
         self._total = 0
         self._next = 0  # absolute start of the next chunk
         self._prev_start = 0  # buffer start of the previous step
+        self._full_window = False
         self._done = False
 
     @property
@@ -131,6 +132,12 @@ class BufferedEncoderState:
             self._prev_start = start
             self._next += C
         outputs = self._encode_batches(ready)
+        if not self._full_window and ready and ready[-1][1] - ready[-1][0] == L + C + R:
+            # Until the left context fills, every window is a new size and MLX's
+            # buffer cache keeps each size's buffers. From here on every window has
+            # one size, so drop the ramp's buffers once.
+            self._full_window = True
+            mx.clear_cache()
         if final:
             if self._total > self._next:
                 # NeMo caps the last buffer at left + chunk + right samples.
