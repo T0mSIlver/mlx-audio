@@ -19,6 +19,9 @@ from .attention import RelPositionalEncoding, RelPositionMultiHeadAttention
 from .config import ConformerArgs
 
 NEG_INF = -1e30
+# NeMo's masking value (INF_VAL). Unlike -1e30 it stays finite in float16, where a
+# query row with every key masked would otherwise turn NaN.
+MASK_VALUE = -1e4
 
 
 def create_chunked_limited_mask(seq_len: int, left_context: int, right_context: int):
@@ -302,7 +305,7 @@ class Conformer(nn.Module):
                         None, None
                     ]
                 )
-            mask = mx.where(visible, 0.0, NEG_INF).astype(x.dtype)
+            mask = mx.where(visible, 0.0, MASK_VALUE).astype(x.dtype)
 
         for layer in self.layers:
             x = layer(x, pos_emb=pos_emb, mask=mask, valid=valid)
