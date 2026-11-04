@@ -270,8 +270,12 @@ class Model(nn.Module):
         temperature=0.0,
         language=None,
         transcription_delay_ms=None,
+        att_context_size=None,
     ) -> StreamingSession:
-        """Create an independent live-input greedy transcription session."""
+        """Create an independent live-input greedy transcription session.
+
+        Unified checkpoints also take ``att_context_size=[left, chunk, right]`` in 80 ms
+        encoder frames instead of a latency, to trade accuracy for GPU time."""
         from .session import NemotronStreamingSession
 
         return NemotronStreamingSession(
@@ -279,6 +283,7 @@ class Model(nn.Module):
             temperature=temperature,
             language=language,
             transcription_delay_ms=transcription_delay_ms,
+            att_context_size=att_context_size,
         )
 
     def _prepare_audio(

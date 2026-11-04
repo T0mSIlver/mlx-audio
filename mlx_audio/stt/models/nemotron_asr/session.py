@@ -21,7 +21,13 @@ class NemotronStreamingSession:
     """
 
     def __init__(
-        self, model, *, temperature=0.0, language=None, transcription_delay_ms=None
+        self,
+        model,
+        *,
+        temperature=0.0,
+        language=None,
+        transcription_delay_ms=None,
+        att_context_size=None,
     ):
         if temperature != 0.0:
             raise ValueError("Nemotron streaming supports greedy temperature=0 only")
@@ -34,11 +40,15 @@ class NemotronStreamingSession:
             self._context = BufferedContext.from_att_context_size(
                 model.default_att_context_size
             )
-            if transcription_delay_ms is not None:
+            if att_context_size is not None:
+                self._context = BufferedContext.from_att_context_size(att_context_size)
+            elif transcription_delay_ms is not None:
                 self._context = BufferedContext.from_delay_ms(
                     transcription_delay_ms, left=self._context.left
                 )
             self.att_context_size = self._context.as_list()
+        elif att_context_size is not None:
+            raise ValueError("att_context_size needs a buffered (Unified) checkpoint")
         elif (
             transcription_delay_ms is not None
             and model.model_type == "nemotron_asr_streaming"

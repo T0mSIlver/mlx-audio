@@ -271,3 +271,25 @@ def test_real_unified_model_streams_like_offline():
     streamed = list(model.stream_generate(audio, language="en"))[-1].text.strip()
     assert offline
     assert streamed
+
+
+def test_session_takes_an_explicit_context():
+    model = _unified_model()
+    session = model.create_streaming_session(att_context_size=[2, 2, 1])
+    assert session.att_context_size == [2, 2, 1]
+    audio = np.random.default_rng(9).normal(0, 0.05, 20 * 1280 + 70).astype(np.float32)
+    assert _session_text_with(model, audio, 61, [2, 2, 1]) == _session_text_with(
+        model, audio, 5000, [2, 2, 1]
+    )
+
+
+def _session_text_with(model, audio, feed, context):
+    session = model.create_streaming_session(language="en-US", att_context_size=context)
+    parts = []
+    for start in range(0, audio.size, feed):
+        session.feed(audio[start : start + feed])
+        parts.extend(session.step(max_decode_tokens=8))
+    session.close()
+    while not session.done:
+        parts.extend(session.step(max_decode_tokens=8))
+    return "".join(parts)
