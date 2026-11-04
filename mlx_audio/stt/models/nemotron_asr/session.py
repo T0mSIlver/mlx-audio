@@ -16,8 +16,10 @@ class NemotronStreamingSession:
     """Single-consumer decoder; feed/close may run on another thread.
 
     Queued input is limited to 30 seconds. Overflow is explicit; audio is never
-    silently dropped. step budgets joint evaluations (including blanks), not
-    just visible text, so silence also yields cooperatively.
+    silently dropped. For Nemotron 3.5, step budgets joint evaluations (including
+    blanks), not just visible text, so silence also yields cooperatively. A Nemotron
+    Unified (buffered) step ingests up to a batch of chunks and decodes all of it;
+    undecoded frames count against the 30-second limit.
     """
 
     def __init__(

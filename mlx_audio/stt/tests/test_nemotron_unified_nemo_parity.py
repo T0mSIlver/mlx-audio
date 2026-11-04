@@ -16,7 +16,13 @@ import pytest
 
 FIXTURE = Path(__file__).parent / "data" / "nemotron_unified_nemo_tokens.json"
 AUDIO = Path(__file__).parent / "mega_asr" / "fixtures" / "clean.wav"
-CONTEXTS = {"160": (1, 1), "320": (1, 3), "560": (2, 5), "1120": (7, 7), "2080": (13, 13)}
+CONTEXTS = {
+    "160": (1, 1),
+    "320": (1, 3),
+    "560": (2, 5),
+    "1120": (7, 7),
+    "2080": (13, 13),
+}
 
 
 def _edits(a, b):
@@ -33,7 +39,9 @@ def _edits(a, b):
 def model():
     path = os.environ.get("NEMOTRON_UNIFIED_MLX_PATH")
     if not path:
-        pytest.skip("set NEMOTRON_UNIFIED_MLX_PATH to a converted Nemotron Unified checkpoint")
+        pytest.skip(
+            "set NEMOTRON_UNIFIED_MLX_PATH to a converted Nemotron Unified checkpoint"
+        )
     from mlx_audio.stt import load
 
     return load(path)
@@ -54,7 +62,11 @@ def test_tokens_match_nemo(model, latency):
         result = model.generate(audio, language="en")
     else:
         chunk, right = CONTEXTS[latency]
-        result = list(model.stream_generate(audio, language="en", att_context_size=[70, chunk, right]))[-1]
+        result = list(
+            model.stream_generate(
+                audio, language="en", att_context_size=[70, chunk, right]
+            )
+        )[-1]
     tokens = [t.id for s in result.sentences for t in s.tokens]
     rate = _edits(tokens, expected) / max(len(expected), 1)
     assert rate <= _tolerance(model), (latency, rate, tokens, expected)

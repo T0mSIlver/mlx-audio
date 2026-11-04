@@ -486,11 +486,14 @@ class Model(nn.Module):
         dtype: mx.Dtype = mx.float32,
         **kwargs,
     ):
-        """Cache-aware streaming transcription.
+        """Streaming transcription.
 
-        Yields a cumulative ``AlignedResult`` per chunk as audio is processed, using
-        per-layer attention/conv caches and incremental subsampling (O(n), no
-        recompute). Token-identical to :meth:`generate` at the native chunk size.
+        Yields a cumulative ``AlignedResult`` per chunk as audio is processed.
+        Nemotron 3.5 streams cache-aware, with per-layer attention/conv caches and
+        incremental subsampling (O(n), no recompute), token-identical to
+        :meth:`generate` at the native chunk size. Nemotron Unified streams buffered:
+        each chunk re-encodes left context + chunk + right context
+        (``att_context_size``, in 80 ms frames), as NeMo's buffered streaming does.
         """
         audio_data = self._prepare_audio(audio, dtype)
         if self.buffered:

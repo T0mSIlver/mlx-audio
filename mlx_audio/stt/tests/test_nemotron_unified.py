@@ -117,7 +117,6 @@ def test_encoder_ignores_padded_frames(context):
     )
 
 
-
 def test_float16_mask_stays_finite_when_a_chunk_is_all_padding():
     # A left-0 layout leaves a padded chunk with every key masked. A mask value that
     # overflows to -inf in float16 turns such rows NaN, and the NaN reaches valid
@@ -134,6 +133,7 @@ def test_float16_mask_stays_finite_when_a_chunk_is_all_padding():
     )
     assert int(lengths[0]) == 10
     assert np.isfinite(np.array(out[:, :10].astype(mx.float32))).all()
+
 
 def test_per_feature_mel_uses_valid_frames():
     args = ModelConfig.from_dict(_unified_config()).config.preprocessor
