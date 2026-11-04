@@ -165,11 +165,15 @@ def test_feed_rejects_stereo_and_non_finite():
         session.feed(np.array([0.0, np.nan], np.float32))
 
 
-@pytest.mark.parametrize("message_ms", [100, 200, 480])
+@pytest.mark.parametrize("message_ms", [100, 200, 480, 1000])
 def test_server_pattern_keeps_up_with_large_messages(message_ms):
-    # The realtime server steps once per received message; a session that took one
-    # chunk per step fell behind and overflowed its 30 s queue.
+    # The realtime server steps once per received message, with a budget of 8. A
+    # session that took one chunk per step overflowed its 30 s queue; one that counted
+    # blank frames against the budget (12.5 per 1 s message) piled up encoded frames.
+    # The joint always predicts blank, as on silence: a random model's dense tokens
+    # would make decoding, not ingest, the limit.
     model = _unified_model()
+    model.joint = lambda enc, pred: mx.arange(model.blank_id + 1)
     session = model.create_streaming_session(
         language="en-US", transcription_delay_ms=320
     )
@@ -178,4 +182,13 @@ def test_server_pattern_keeps_up_with_large_messages(message_ms):
     for start in range(0, audio.size, message):
         session.feed(audio[start : start + message])
         session.step(max_decode_tokens=8)
+        assert session._pending_frames == 0
     assert session._queued < 2 * message + session._buffered.chunk_samples
+
+
+def test_undecoded_frames_count_against_the_input_limit():
+    model = _unified_model()
+    session = model.create_streaming_session(language="en-US")
+    session._pending_frames = 30 * 16000 // session._buffered.frame_samples
+    with pytest.raises(BufferError):
+        session.feed(np.zeros(1280, np.float32))

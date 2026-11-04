@@ -72,6 +72,8 @@ class NemotronStreamingSession:
             self._closed = False
             self._done = False
         self._encoded = deque()
+        # Encoded frames not yet decoded; feed() counts them against the input limit.
+        self._pending_frames = 0
         self._frame = 0
         self._symbols = 0
         self._last_token = self.model.blank_id
@@ -106,7 +108,10 @@ class NemotronStreamingSession:
         with self._lock:
             if self._closed:
                 raise RuntimeError("streaming input is closed")
-            if self._queued + samples.size > 30 * self.input_sample_rate:
+            backlog = self._queued + samples.size
+            if self._context is not None:
+                backlog += self._pending_frames * self._buffered.frame_samples
+            if backlog > 30 * self.input_sample_rate:
                 raise BufferError("Nemotron streaming input queue exceeds 30 seconds")
             if samples.size:
                 self._audio.append(samples.copy())
@@ -147,7 +152,9 @@ class NemotronStreamingSession:
             return
         samples = np.concatenate(parts) if parts else np.empty(0, dtype=np.float32)
         if self._context is not None:
-            self._encoded.extend(self._buffered.push(samples, final=final))
+            chunks = self._buffered.push(samples, final=final)
+            self._encoded.extend(chunks)
+            self._pending_frames += sum(chunk.shape[1] for chunk in chunks)
             self._flushed = final
             return
         # Empty streams should not manufacture a reflected silence frame.
@@ -174,9 +181,14 @@ class NemotronStreamingSession:
         elif not self._encoded and not self._flushed:
             self._ingest()
         deltas = []
-        for _ in range(max_decode_tokens):
-            if not self._encoded:
+        # A buffered session ingests up to a batch of chunks per step, so a blank
+        # frame does not use the budget: it caps emitted tokens, and the frames the
+        # step ingested decode within it whatever the server's message size.
+        evaluations = emitted = 0
+        while self._encoded and emitted < max_decode_tokens:
+            if self._context is None and evaluations == max_decode_tokens:
                 break
+            evaluations += 1
             feature = self._encoded[0][:, self._frame : self._frame + 1]
             if self._prediction is None:
                 token = (
@@ -201,6 +213,7 @@ class NemotronStreamingSession:
                 if text:
                     self._has_text = True
                     deltas.append(text)
+                emitted += 1
                 self._symbols += 1
             if prediction == self.model.blank_id or (
                 self.model.max_symbols is not None
@@ -208,6 +221,8 @@ class NemotronStreamingSession:
             ):
                 self._frame += 1
                 self._symbols = 0
+                if self._context is not None:
+                    self._pending_frames -= 1
                 if self._frame == self._encoded[0].shape[1]:
                     self._encoded.popleft()
                     self._frame = 0
