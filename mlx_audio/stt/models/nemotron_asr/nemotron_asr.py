@@ -41,6 +41,7 @@ from .config import (
     PromptArgs,
 )
 from .conformer import Conformer
+from .hotwords import DEFAULT_HOTWORDS_ALPHA, make_booster
 from .rnnt import GreedyDecoderState, JointNetwork, PredictNetwork
 
 
@@ -270,11 +271,14 @@ class Model(nn.Module):
         language=None,
         transcription_delay_ms=None,
         att_context_size=None,
+        hotwords: list[str] | None = None,
+        hotwords_alpha: float = DEFAULT_HOTWORDS_ALPHA,
     ) -> StreamingSession:
         """Create an independent live-input greedy transcription session.
 
         Unified checkpoints also take ``att_context_size=[left, chunk, right]`` in 80 ms
-        encoder frames instead of a latency, to trade accuracy for GPU time."""
+        encoder frames instead of a latency, to trade accuracy for GPU time.
+        ``hotwords`` boosts those words while decoding (see :meth:`generate`)."""
         from .session import NemotronStreamingSession
 
         return NemotronStreamingSession(
@@ -283,6 +287,8 @@ class Model(nn.Module):
             language=language,
             transcription_delay_ms=transcription_delay_ms,
             att_context_size=att_context_size,
+            hotwords=hotwords,
+            hotwords_alpha=hotwords_alpha,
         )
 
     def _prepare_audio(
@@ -395,6 +401,7 @@ class Model(nn.Module):
         mel: mx.array,
         language: Optional[str] = None,
         att_context_size: Optional[list] = None,
+        booster=None,
     ) -> AlignedResult:
         """Greedy RNN-T decode of a single mel spectrogram (1, T, F) or (T, F)."""
         if mel.ndim == 2:
@@ -413,7 +420,8 @@ class Model(nn.Module):
                     mel,
                     language or self.default_language,
                     att_context_size=att_context_size,
-                )
+                ),
+                booster,
             ):
                 pass
             return result or sentences_to_result([])
@@ -424,7 +432,9 @@ class Model(nn.Module):
         encoded = self.apply_prompt(encoded, language)
         mx.eval(encoded, lengths)
 
-        hypothesis = GreedyDecoderState(self).decode(encoded[:, : int(lengths[0])], 0)
+        hypothesis = GreedyDecoderState(self, booster).decode(
+            encoded[:, : int(lengths[0])], 0
+        )
         return sentences_to_result(tokens_to_sentences(hypothesis))
 
     # ---------------------------------------------------------------- generate
@@ -437,17 +447,25 @@ class Model(nn.Module):
         chunk_duration: Optional[float] = 30.0,
         dtype: mx.Dtype = mx.float32,
         verbose: bool = False,
+        hotwords: list[str] | None = None,
+        hotwords_alpha: float = DEFAULT_HOTWORDS_ALPHA,
         **kwargs,
     ) -> AlignedResult:
         """Transcribe an audio file or waveform. ``language`` is a prompt key
-        (e.g. ``"en-US"``, ``"auto"``); defaults to the model's default."""
+        (e.g. ``"en-US"``, ``"auto"``); defaults to the model's default.
+
+        ``hotwords`` boosts those words in the greedy decoder, as NeMo's word
+        boosting does (see ``hotwords.py``); ``hotwords_alpha`` is its weight."""
         kwargs.pop("generation_stream", None)
         kwargs.pop("max_tokens", None)
 
         audio_data = self._prepare_audio(audio, dtype)
+        booster = make_booster(self, hotwords, hotwords_alpha)
 
         if self.buffered:
-            result = self._generate_buffered(audio_data, language, att_context_size)
+            result = self._generate_buffered(
+                audio_data, language, att_context_size, booster
+            )
             if verbose:
                 print(result.text)
             return result
@@ -455,7 +473,10 @@ class Model(nn.Module):
         if chunk_duration is None:
             mel = log_mel_spectrogram(audio_data, self.preprocessor_config)
             result = self.decode(
-                mel, language=language, att_context_size=att_context_size
+                mel,
+                language=language,
+                att_context_size=att_context_size,
+                booster=booster,
             )
             mx.clear_cache()
         else:
@@ -465,6 +486,7 @@ class Model(nn.Module):
                 language=language,
                 chunk_duration=chunk_duration,
                 att_context_size=att_context_size,
+                booster=booster,
             ):
                 pass
             result = result or sentences_to_result([])
@@ -483,6 +505,8 @@ class Model(nn.Module):
         chunk_duration: float = 30.0,
         att_context_size: Optional[list] = None,
         dtype: mx.Dtype = mx.float32,
+        hotwords: list[str] | None = None,
+        hotwords_alpha: float = DEFAULT_HOTWORDS_ALPHA,
         **kwargs,
     ):
         """Streaming transcription.
@@ -495,9 +519,10 @@ class Model(nn.Module):
         (``att_context_size``, in 80 ms frames), as NeMo's buffered streaming does.
         """
         audio_data = self._prepare_audio(audio, dtype)
+        booster = make_booster(self, hotwords, hotwords_alpha)
         if self.buffered:
             yield from self._stream_generate_buffered(
-                audio_data, language, att_context_size
+                audio_data, language, att_context_size, booster
             )
             return
         yield from self._stream_generate_audio_data(
@@ -506,6 +531,7 @@ class Model(nn.Module):
             chunk_frames=chunk_frames,
             chunk_duration=chunk_duration,
             att_context_size=att_context_size,
+            booster=booster,
         )
 
     def _stream_generate_audio_data(
@@ -516,6 +542,7 @@ class Model(nn.Module):
         chunk_frames: Optional[int] = None,
         chunk_duration: float = 30.0,
         att_context_size: Optional[list] = None,
+        booster=None,
     ):
         from .streaming import stream_encode_chunks
 
@@ -532,7 +559,7 @@ class Model(nn.Module):
             att_context_size=att_context_size,
         )
         try:
-            yield from self._decode_prompted_chunks(prompted_chunks)
+            yield from self._decode_prompted_chunks(prompted_chunks, booster)
         finally:
             mx.clear_cache()
 
@@ -551,7 +578,7 @@ class Model(nn.Module):
     OFFLINE_MAX_SECONDS = 60.0
     LONG_FORM_CONTEXT = (125, 125, 62)
 
-    def _generate_buffered(self, audio_data, language, att_context_size):
+    def _generate_buffered(self, audio_data, language, att_context_size, booster):
         language = language or self.default_language
         sample_rate = self.preprocessor_config.sample_rate
         if att_context_size is None and (
@@ -568,7 +595,7 @@ class Model(nn.Module):
             )
             encoded = self.apply_prompt(encoded[:, : int(encoded_lengths[0])], language)
             mx.eval(encoded)
-            hypothesis = GreedyDecoderState(self).decode(encoded, 0)
+            hypothesis = GreedyDecoderState(self, booster).decode(encoded, 0)
             mx.clear_cache()
             return sentences_to_result(tokens_to_sentences(hypothesis))
         context = BufferedContext.from_att_context_size(
@@ -576,11 +603,15 @@ class Model(nn.Module):
         )
         state = BufferedEncoderState(self, context, language)
         result = None
-        for result in self._decode_prompted_chunks(state.push(audio_data, final=True)):
+        for result in self._decode_prompted_chunks(
+            state.push(audio_data, final=True), booster
+        ):
             pass
         return result or sentences_to_result([])
 
-    def _stream_generate_buffered(self, audio_data, language, att_context_size):
+    def _stream_generate_buffered(
+        self, audio_data, language, att_context_size, booster
+    ):
         context = BufferedContext.from_att_context_size(
             att_context_size or self.default_att_context_size
         )
@@ -594,12 +625,12 @@ class Model(nn.Module):
             yield from state.flush()
 
         try:
-            yield from self._decode_prompted_chunks(chunks())
+            yield from self._decode_prompted_chunks(chunks(), booster)
         finally:
             mx.clear_cache()
 
-    def _decode_prompted_chunks(self, prompted_chunks):
-        decoder = GreedyDecoderState(self)
+    def _decode_prompted_chunks(self, prompted_chunks, booster=None):
+        decoder = GreedyDecoderState(self, booster)
         hypothesis = []
         global_time = 0
         for prompted in prompted_chunks:

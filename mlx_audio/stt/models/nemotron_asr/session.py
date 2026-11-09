@@ -9,6 +9,7 @@ import numpy as np
 from . import tokenizer
 from .audio import StreamingLogMelSpectrogram
 from .buffered import BufferedContext, BufferedEncoderState
+from .hotwords import DEFAULT_HOTWORDS_ALPHA, make_booster, normalize_hotwords
 from .streaming import ConformerStreamingState
 
 
@@ -30,10 +31,14 @@ class NemotronStreamingSession:
         language=None,
         transcription_delay_ms=None,
         att_context_size=None,
+        hotwords=None,
+        hotwords_alpha=DEFAULT_HOTWORDS_ALPHA,
     ):
         if temperature != 0.0:
             raise ValueError("Nemotron streaming supports greedy temperature=0 only")
         self.model = model
+        self.hotwords = normalize_hotwords(hotwords)
+        self.hotwords_alpha = hotwords_alpha
         self.language = language or model.default_language
         model._resolve_prompt_index(self.language)
         self.att_context_size = model.default_att_context_size
@@ -84,6 +89,7 @@ class NemotronStreamingSession:
         self._prediction = None
         self._flushed = False
         self._has_text = False
+        self._booster = make_booster(self.model, self.hotwords, self.hotwords_alpha)
         if self._context is not None:
             self._buffered = BufferedEncoderState(
                 self.model, self._context, self.language
@@ -203,10 +209,13 @@ class NemotronStreamingSession:
                 self._prediction = self.model.decoder(token, self._hidden)
             output, (h, c) = self._prediction
             hidden = (h.astype(feature.dtype), c.astype(feature.dtype))
-            prediction = int(
-                mx.argmax(self.model.joint(feature, output.astype(feature.dtype)))
-            )
+            logits = self.model.joint(feature, output.astype(feature.dtype))
+            prediction = int(mx.argmax(logits))
+            if self._booster is not None:
+                prediction = self._booster.choose(logits.astype(mx.float32), prediction)
             if prediction != self.model.blank_id:
+                if self._booster is not None:
+                    self._booster.accept(prediction)
                 self._last_token = prediction
                 self._hidden = hidden
                 self._prediction = None

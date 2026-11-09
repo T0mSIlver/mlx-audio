@@ -86,6 +86,23 @@ caches, and activity-based cache gating. Overlapping voices are not separated.
 See the [diarization integration documentation](../../../vad/models/nemotron_diarization/README.md#speaker-attributed-transcription)
 for options, latency, and the runnable example.
 
+## Hotwords
+
+`hotwords` boosts a list of words or phrases in the greedy decoder, with NeMo's
+word boosting (its GPU phrase-boosting tree in shallow fusion). Nothing is
+retrained and the encoder is untouched.
+
+```python
+result = model.generate("speech.wav", hotwords=["Neywa Labs", "Nemotron"])
+session = model.create_streaming_session(hotwords=["Neywa Labs", "Nemotron"])
+```
+
+The unbiased argmax still decides whether a frame emits a token. On a frame
+that does, tokens that start or continue a hotword get NeMo's tree score times
+`hotwords_alpha` (NeMo's `boosting_tree_alpha`, default 1.0), and a token that
+breaks a partial match gives that match's score back. Matching ignores case and
+how the hotword is tokenized. An empty list leaves decoding unchanged.
+
 ## Language prompt
 
 Pass `language=<key>` where `<key>` is from the model's `prompt_dictionary`

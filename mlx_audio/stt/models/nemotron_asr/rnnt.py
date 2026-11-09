@@ -14,8 +14,9 @@ from .config import JointArgs, PredictArgs
 class GreedyDecoderState:
     """Incremental RNN-T predictor state; timestamps use the caller's audio clock."""
 
-    def __init__(self, model):
+    def __init__(self, model, booster=None):
         self.model = model
+        self.booster = booster
         self.last_token = model.blank_id
         self.hidden = None
         self._prediction = None
@@ -45,11 +46,14 @@ class GreedyDecoderState:
                     )
                     self._prediction = model.decoder(current, self.hidden)
                 prediction, (h, c) = self._prediction
-                token = int(
-                    mx.argmax(model.joint(feature, prediction.astype(feature.dtype)))
-                )
+                logits = model.joint(feature, prediction.astype(feature.dtype))
+                token = int(mx.argmax(logits))
+                if self.booster is not None:
+                    token = self.booster.choose(logits.astype(mx.float32), token)
                 if token == model.blank_id:
                     break
+                if self.booster is not None:
+                    self.booster.accept(token)
                 self.last_token = token
                 self.hidden = (h.astype(feature.dtype), c.astype(feature.dtype))
                 self._prediction = None
