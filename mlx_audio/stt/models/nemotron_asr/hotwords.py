@@ -18,7 +18,7 @@ TurboBias, arXiv:2508.07014) as it runs in greedy label-looping decoding:
 
 Where this differs: NeMo builds its tree from one tokenization of each phrase.
 There is no SentencePiece encoder here, so matching runs on the NFKC-normalized,
-lowercased text each token appends (``▁`` as a space). Every tokenization and
+case-folded text each token appends (``▁`` as a space). Every tokenization and
 casing of a hotword is boosted, and depth counts the tokens actually emitted,
 so a spelling in more pieces collects more score than NeMo's single path would.
 A phrase starts only at a word boundary (the start of the transcript counts), a
@@ -52,6 +52,16 @@ class _Match(NamedTuple):
 _ROOT = _Match("", 0, 0.0)
 
 
+def fold(text: str) -> str:
+    """Lowercase one character at a time, with final sigma folded to sigma.
+
+    A hotword and the pieces that spell it must fold the same way, so casing
+    cannot depend on context: ``"ΟΣ".lower()`` ends in "ς" but the piece "Σ"
+    lowers to "σ".
+    """
+    return "".join(c.lower() for c in text).replace("ς", "σ")
+
+
 def normalize_hotwords(hotwords: Optional[Iterable[str]]) -> list[str]:
     """Strip each hotword and drop empty ones."""
     return [str(t).strip() for t in hotwords or [] if t is not None and str(t).strip()]
@@ -75,14 +85,14 @@ class HotwordBooster:
         self.blank_id = blank_id
         self._keys = set()
         for term in normalize_hotwords(hotwords):
-            words = unicodedata.normalize("NFKC", term).lower().split()
+            words = fold(unicodedata.normalize("NFKC", term)).split()
             self._keys.add(" " + " ".join(words))
         self._piece_ids: dict[str, list[int]] = {}
         self._text_pieces: set[int] = set()
         for token, piece in enumerate(vocabulary):
             if token == blank_id or tokenizer.is_special_piece(piece):
                 continue
-            text = tokenizer.piece_to_text(piece).lower()
+            text = fold(tokenizer.piece_to_text(piece))
             if not text:
                 continue
             self._piece_ids.setdefault(text, []).append(token)

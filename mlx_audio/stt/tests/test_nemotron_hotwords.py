@@ -26,9 +26,14 @@ VOCAB = [
     "cl",
     "▁code",
     "▁red",
+    "▁ΟΣ",
+    "▁Ο",
+    "Σ",
 ]
 BLANK = len(VOCAB)
-HELLO, CL, AUDE, CLA_UPPER, UDE, SPACE, CL_MID, CODE, RED = range(2, 11)
+HELLO, CL, AUDE, CLA_UPPER, UDE, SPACE, CL_MID, CODE, RED, OS_WORD, O_START, SIGMA = (
+    range(2, 14)
+)
 LANG = 1
 
 
@@ -91,6 +96,15 @@ def test_any_tokenization_casing_and_width_matches():
     assert score(b, CLA_UPPER) == pytest.approx(1.0)
     b.accept(CLA_UPPER)
     assert score(b, UDE) == pytest.approx(2.0 + math.log(2))
+
+
+@pytest.mark.parametrize("hotword", ["ΟΣ", "ος"])
+def test_casing_folds_the_same_across_a_token_boundary(hotword):
+    # "ΟΣ".lower() ends in a final sigma, while the piece "Σ" alone lowers to "σ".
+    b = booster([hotword])
+    assert score(b, OS_WORD) == pytest.approx(1.0)
+    b.accept(O_START)
+    assert score(b, SIGMA) == pytest.approx(2.0 + math.log(2))
 
 
 def test_a_phrase_starts_only_at_a_word_boundary():
