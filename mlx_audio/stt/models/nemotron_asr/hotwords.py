@@ -18,12 +18,12 @@ TurboBias, arXiv:2508.07014) as it runs in greedy label-looping decoding:
 
 Where this differs: NeMo builds its tree from one tokenization of each phrase.
 There is no SentencePiece encoder here, so matching runs on the NFKC-normalized,
-case-folded text each token appends (``▁`` as a space). Every tokenization and
-casing of a hotword is boosted, and depth counts the tokens actually emitted,
-so a spelling in more pieces collects more score than NeMo's single path would.
-A phrase starts only at a word boundary (the start of the transcript counts), a
-bare ``▁`` moves a match along without depth or score, and special tokens leave
-the matches alone.
+lowercased text each token appends (one character at a time, final sigma as
+sigma; ``▁`` as a space). Every tokenization and upper/lower casing of a hotword
+is boosted, and depth counts the tokens actually emitted, so a spelling in more
+pieces collects more score than NeMo's single path would. A phrase starts only at
+a word boundary (the start of the transcript counts), a bare ``▁`` moves a match
+along without depth or score, and special tokens leave the matches alone.
 """
 
 from __future__ import annotations
