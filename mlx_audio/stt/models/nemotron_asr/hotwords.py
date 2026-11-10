@@ -6,7 +6,9 @@ TurboBias, arXiv:2508.07014) as it runs in greedy label-looping decoding:
 
 * The unbiased argmax decides blank or not. On a blank frame nothing changes;
   otherwise every non-blank token gets ``alpha`` times its tree score added to
-  its logit and the argmax is taken again over non-blank tokens.
+  its logit and the argmax is taken again over non-blank tokens. A frame whose
+  argmax is a special token, such as a language tag, is left alone too, and
+  special tokens never take a frame from a text token.
 * A token that starts a phrase scores ``context_score``; the token at depth
   ``d >= 1`` of a match scores ``context_score * depth_scaling + ln(d + 1)``.
 * A token that breaks a partial match takes the failure arc, whose score gives
@@ -14,17 +16,20 @@ TurboBias, arXiv:2508.07014) as it runs in greedy label-looping decoding:
   match that completed a phrase backs off at no cost. A token outside every
   phrase scores ``unk_score`` (0).
 
-One difference: NeMo builds its tree from the tokenizer's ids for each phrase.
-Here matching runs on the lowercased text a token appends (``▁`` as a space),
-so every tokenization and casing of a hotword is boosted, as NeMo's
-``case_insensitive`` mode intends, without needing a SentencePiece encoder. A
-phrase starts only at a word boundary, and a bare ``▁`` piece moves a match
-along without adding depth or score.
+Where this differs: NeMo builds its tree from one tokenization of each phrase.
+There is no SentencePiece encoder here, so matching runs on the NFKC-normalized,
+lowercased text each token appends (``▁`` as a space). Every tokenization and
+casing of a hotword is boosted, and depth counts the tokens actually emitted,
+so a spelling in more pieces collects more score than NeMo's single path would.
+A phrase starts only at a word boundary (the start of the transcript counts), a
+bare ``▁`` moves a match along without depth or score, and special tokens leave
+the matches alone.
 """
 
 from __future__ import annotations
 
 import math
+import unicodedata
 from typing import Iterable, NamedTuple, Optional
 
 import numpy as np
@@ -70,8 +75,8 @@ class HotwordBooster:
         self.blank_id = blank_id
         self._keys = set()
         for term in normalize_hotwords(hotwords):
-            self._keys.add(" " + " ".join(term.lower().split()))
-        self._prefixes = {key[:i] for key in self._keys for i in range(1, len(key) + 1)}
+            words = unicodedata.normalize("NFKC", term).lower().split()
+            self._keys.add(" " + " ".join(words))
         self._piece_ids: dict[str, list[int]] = {}
         self._text_pieces: set[int] = set()
         for token, piece in enumerate(vocabulary):
@@ -81,9 +86,12 @@ class HotwordBooster:
             if not text:
                 continue
             self._piece_ids.setdefault(text, []).append(token)
-            if text.strip():
+            if text.strip(" "):
                 self._text_pieces.add(token)
         self._emittable = {t for ids in self._piece_ids.values() for t in ids}
+        # Blank and special tokens never take a frame from a text token.
+        self._excluded = np.ones(len(vocabulary) + 1, dtype=bool)
+        self._excluded[list(self._emittable)] = False
         self._max_piece = max((len(text) for text in self._piece_ids), default=0)
         self._extensions_cache: dict[str, list[tuple[int, str]]] = {}
         # Matches under way, longest first: NeMo's failure chain. The root is
@@ -143,13 +151,14 @@ class HotwordBooster:
 
     def choose(self, logits: np.ndarray, greedy: int) -> int:
         """The token to emit instead of ``greedy``, the unbiased argmax of ``logits``."""
-        if greedy == self.blank_id:
+        if greedy not in self._emittable:
             return greedy
         unmatched, token_scores = self.scores()
-        biased = np.asarray(logits, dtype=np.float32).reshape(-1) + unmatched
+        logits = np.asarray(logits, dtype=np.float32).reshape(-1)
+        biased = logits + np.float32(unmatched)
         for token, score in token_scores.items():
-            biased[token] += score - unmatched
-        biased[self.blank_id] = -np.inf
+            biased[token] = logits[token] + np.float32(score)
+        biased[self._excluded[: biased.size]] = -np.inf
         return int(np.argmax(biased))
 
     def accept(self, token: int) -> None:

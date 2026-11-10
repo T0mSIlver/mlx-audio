@@ -14,9 +14,21 @@ from mlx_audio.stt.models.nemotron_asr import Model, ModelConfig
 from mlx_audio.stt.models.nemotron_asr.hotwords import HotwordBooster, make_booster
 from mlx_audio.stt.models.nemotron_asr.rnnt import GreedyDecoderState
 
-VOCAB = ["<unk>", "<en-US>", "▁hello", "▁cl", "aude", "▁Cla", "ude", "▁", "cl", "▁code"]
+VOCAB = [
+    "<unk>",
+    "<en-US>",
+    "▁hello",
+    "▁cl",
+    "aude",
+    "▁Cla",
+    "ude",
+    "▁",
+    "cl",
+    "▁code",
+    "▁red",
+]
 BLANK = len(VOCAB)
-HELLO, CL, AUDE, CLA_UPPER, UDE, SPACE, CL_MID, CODE = 2, 3, 4, 5, 6, 7, 8, 9
+HELLO, CL, AUDE, CLA_UPPER, UDE, SPACE, CL_MID, CODE, RED = range(2, 11)
 LANG = 1
 
 
@@ -72,7 +84,9 @@ def test_a_completed_phrase_backs_off_at_no_cost():
     assert score(b, CODE) == pytest.approx(2.0 + math.log(3))
 
 
-def test_any_tokenization_and_casing_matches():
+def test_any_tokenization_casing_and_width_matches():
+    # Hotwords are NFKC-normalized, as SentencePiece pieces are.
+    assert score(booster(["Ｃｌａｕｄｅ"]), CL) == pytest.approx(1.0)
     b = booster(["CLAUDE"])
     assert score(b, CLA_UPPER) == pytest.approx(1.0)
     b.accept(CLA_UPPER)
@@ -91,10 +105,27 @@ def test_a_phrase_starts_only_at_a_word_boundary():
     assert score(b, CL_MID) == pytest.approx(1.0)
 
 
+def test_a_broken_match_backs_off_to_the_shorter_match_inside_it():
+    b = booster(["claude code x", "code red"])
+    for token in (CL, AUDE, CODE):
+        b.accept(token)
+    collected = 1.0 + (2.0 + math.log(2)) + (2.0 + math.log(3))
+    # " claude code" fails over to " code", which "▁red" continues.
+    assert score(b, RED) == pytest.approx((1.0 - collected) + 2.0 + math.log(2))
+    assert score(b, HELLO) == pytest.approx(-collected)
+
+
 def test_blank_frames_and_blank_are_never_boosted():
-    b = booster(alpha=100.0)
-    assert b.choose(logits(blank=5.0, cl=4.9), BLANK) == BLANK
-    assert b.choose(logits(blank=5.0, hello=5.1), HELLO) == CL
+    assert booster(alpha=100.0).choose(logits(blank=5.0, cl=4.9), BLANK) == BLANK
+    b = booster(["claude code"])
+    b.accept(CL)
+    b.accept(AUDE)
+    # Breaking the match costs "▁hello" 3.69, but blank is out of the re-argmax.
+    assert b.choose(logits(blank=5.0, hello=5.1), HELLO) == HELLO
+
+
+def test_a_language_tag_frame_is_left_alone():
+    assert booster().choose(logits(lang=1.0, cl=0.5), LANG) == LANG
 
 
 def test_a_language_tag_leaves_the_matches_alone():
